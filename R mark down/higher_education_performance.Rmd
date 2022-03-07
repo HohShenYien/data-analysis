@@ -1,0 +1,445 @@
+---
+title: "Higher Education Students Performance Evaluation"
+output: 
+  html_document:
+    theme: darkly
+    df_print: paged
+    highlight: breezedark
+    css: styles.css
+    fig_width: 7
+    fig_height: 7
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = TRUE) 
+```
+This is a classification analysis to try determining the grade of a student based on other attributes.
+
+Dataset source: https://www.kaggle.com/csafrit2/higher-education-students-performance-evaluation
+
+## Loading Libraries
+
+```{r}
+library(dplyr) # data preprocessing
+library(ggplot2) # data visualization
+library(e1071) # svm
+library(randomForest) # random forest
+library(nnet) # multinomial logistic regression
+library(glmnet) # the lasso
+library(class) # KNN
+library(caret) # CV
+library(ggdark)
+```
+
+## Reading the data and viewing the first few rows
+
+```{r}
+data <- read.csv("./data/student_prediction.csv")
+head(data)
+```
+
+
+<br/>
+Many of the columns are using number to indicate factor type of data, therefore, each column will be
+updated to for better representation and understanding for me.
+<br/>
+
+```{r}
+data <- data %>%
+  rename(STUDENT_ID = `ï..STUDENTID`) %>%
+  mutate(AGE = recode(AGE, `1` = "18 - 21", `2` = "22 - 25", `3` = "> 26")) %>%
+  mutate(GENDER = recode(GENDER, `1` = "f", `2` = "m")) %>%
+  mutate(HS_TYPE = recode(HS_TYPE, `1` = "private", `2` = "state", `3` = "other")) %>%
+  mutate(SCHOLARSHIP = recode(SCHOLARSHIP, `1` = 0, `2` = 25, `3` = 50, `4` = 75, `5` = 100)) %>%
+  mutate(WORK = recode(WORK, `1` = TRUE, `2` = FALSE)) %>%
+  mutate(ACTIVITY = recode(ACTIVITY, `1` = TRUE, `2` = FALSE)) %>%
+  mutate(PARTNER = recode(PARTNER, `1` = TRUE, `2` = FALSE)) %>%
+  mutate(SALARY = recode(SALARY, `1` = "135 - 200", `2` = "201 - 270", 
+                         `3` = "271 - 340", `4` = "341 - 410", `5` = "> 410")) %>%
+  mutate(TRANSPORT = recode(TRANSPORT, `1` = "Bus", `2` = "Private car / taxi",
+                            `3` = "Bicycle", `4` = "Other")) %>%
+  mutate(LIVING = recode(LIVING, `1` = "rental", `2` = "dormitory", 
+                         `3` = "with family", `4` = "other")) %>%
+  mutate(MOTHER_EDU = recode(MOTHER_EDU, `1` = "primary school", `2` = "secondary school",
+                             `3` = "high school", `4` = "university", 
+                             `5` = "MSc", `6` = "PhD")) %>%
+  mutate(FATHER_EDU = recode(FATHER_EDU, `1` = "primary school", `2` = "secondary school",
+                             `3` = "high school", `4` = "university", 
+                             `5` = "MSc", `6` = "PhD")) %>%
+  rename(PARENTAL_STATUS = KIDS) %>%
+  mutate(PARENTAL_STATUS = recode(PARENTAL_STATUS, `1` = "married", 
+                                  `2` = "divorced", `3` = "at least one died")) %>%
+  mutate(MOTHER_JOB = recode(MOTHER_JOB, `1` = "retired", `2` = "housewife",
+                             `3` = "government officer", `4` = "private sector employee", 
+                             `5` = "self-employment", `6` = "other")) %>%
+  mutate(FATHER_JOB = recode(FATHER_JOB, `1` = "retired",
+                             `2` = "government officer", `3` = "private sector employee", 
+                             `4` = "self-employment", `5` = "other")) %>%
+  mutate(STUDY_HRS = recode(STUDY_HRS, `1` = "None", `2` = "<5", `3` = "6 - 10",
+                            `4` = "11 - 20", `5` = "> 20")) %>%
+  mutate(READ_FREQ = recode(READ_FREQ, `1` = "None", `2` = "Sometimes", `3` = "Often")) %>%
+  mutate(READ_FREQ_SCI = recode(READ_FREQ_SCI, `1` = "None", `2` = "Sometimes", `3` = "Often")) %>%
+  mutate(ATTEND_DEPT = recode(ATTEND_DEPT, `1` = TRUE, `2` = FALSE)) %>%
+  rename(ATTEND_SEMINAR = ATTEND_DEPT) %>%
+  mutate(IMPACT = recode(IMPACT, `1` = "Positive", `2` = "Negative", `3` = "Neutral")) %>%
+  mutate(ATTEND = recode(ATTEND, `1` = "always", `2` = "sometimes", `3` = "never")) %>%
+  mutate(PREP_STUDY = recode(PREP_STUDY, `1` = "alone", `2` = "with friends", `3` = "not applicable")) %>%
+  mutate(PREP_EXAM = recode(PREP_EXAM, `1` = "close to exam", `2` = "regularly", `3` = "never")) %>%
+  mutate(NOTES = recode(NOTES, `1` = "never", `2` = "sometimes", `3` = "always")) %>%
+  mutate(LISTENS = recode(LISTENS, `1` = "never", `2` = "sometimes", `3` = "always")) %>%
+  mutate(LIKES_DISCUSS = recode(LIKES_DISCUSS, `1` = "never", `2` = "sometimes", `3` = "always")) %>%
+  mutate(CLASSROOM = recode(CLASSROOM, `1` = "not useful", `2` = "useful", `3` = "not applicable")) %>%
+  mutate(CUML_GPA = recode(CUML_GPA, `1` = "< 2.00", `2` = "2.00 - 2.49", `3` = "2.50 - 2.99",
+                           `4` = "3.00 - 3.49", `5` = "> 3.49")) %>%
+  mutate(EXP_GPA = recode(EXP_GPA, `1` = "< 2.00", `2` = "2.00 - 2.49", `3` = "2.50 - 2.99",
+                           `4` = "3.00 - 3.49", `5` = "> 3.49")) %>%
+  mutate(GRADE = recode(GRADE, `0` = "fail", `1` = "DD", `2` = "DC", `3` = "CC", `4` = "CB",
+                        `5` = "BB", `6` = "BA", `7` = "AA")) %>%
+  select(-STUDENT_ID) # removing unique value column
+  
+head(data)
+```
+
+<br/>
+much better, now change most of the columns to factor
+<br/>
+
+```{r}
+col_names <- names(data)
+factor_columns <- col_names[!col_names %in% c("STUDENT_ID", "WORK", "ACTIVITY", "PARTNER",
+                                              "X._SIBLINGS", "ATTEND_SEMINAR")]
+data[factor_columns] <- lapply(data[factor_columns], factor)
+head(data)
+```
+
+## Exploring the Dataset
+
+### Overview
+
+Phew, that was some tedious cleaning part. Now time to quickly explore a little
+about the data. 
+
+```{r}
+summary(data)
+```
+
+
+A rough looking at the summary shows that:
+
+- There are only 145 rows, so there might not be enough data. 
+
+- The students mostly prepare for their exam nearly last minute,
+
+- and they don't seem to always listens to class. 
+
+- Another surprising fact was that about half(64 / 145) of the students don't think
+that the class is useful for their studies.
+
+- Most of the students (74 + 29/ 145) spends lesser than 5 hours on studying weekly
+
+## Splitting train / test set
+
+I am going 25:75 for test:train data separation.
+
+```{r}
+set.seed(1)
+train = sample(1:nrow(data), nrow(data) / 4 * 3)
+```
+
+## Using Random Forest
+
+Random Forest is one of my favorite model, so I will quickly use a random forest 
+model to model the dataset. Then, the Gini Index decrement will be used to assess how
+important
+
+```{r}
+model.randomForest <- randomForest(GRADE ~ ., data = data, subset = train, mty = 13,
+                                  importance = TRUE)
+
+
+
+imp <- model.randomForest$importance[, "MeanDecreaseGini"]
+imp <- as.data.frame(imp)
+imp$varnames <- rownames(imp) 
+
+ggplot(imp, aes(x=reorder(varnames, imp), weight=imp, fill=as.factor(imp))) + 
+  geom_bar() +
+  ylab("Mean Decrease in Gini Index") +
+  xlab("Variable Name") +
+  coord_flip() +
+  dark_theme_gray() +
+  theme(legend.position="none") +
+  labs(title = "Mean Decrease in Gini Index for each variable")
+```
+
+Looking at the chart above, 
+- It is not surprising that course ID will affect the 
+grade the most because some courses are definitely easier and others harder,
+so clearly everyone from the same course will have similar grades.
+
+- Besides, cuml_gpa's and exp_gpa's effects are obvious too, as your past gpa is
+higher, your grade will be higher because if you performed well in the past,
+you will probably perform equally well in the future too.
+
+- The impacts of MOTHER_EDU and FATHER_EDU seem to be significant as well. This is
+naturally true as I am expecting the higher the parents' educations, the higher the
+students' grades.
+
+- The unexpected effect was from number of siblings which have
+more impact than study hours. I guess when you have more
+siblings means that you have to spend more time with siblings will result in 
+worse grades? Time to verify this theory with a plot.
+
+```{r}
+data %>% 
+  group_by(X._SIBLINGS, GRADE) %>%
+  summarize(n = n()) %>%
+  mutate(percentage = n / sum(n)) %>%
+  ggplot(data, mapping = aes(x = X._SIBLINGS, fill = GRADE, y = percentage)) +
+  geom_bar(position = "dodge", stat = "identity") + 
+  dark_theme_gray() +
+  labs(title = "Grade against Number of Siblings ") + 
+  scale_y_continuous(labels = function(x) paste0(x*100, "%"))
+```
+
+From this graph, I can't exactly tell the relationship between Grade and X._Siblings.
+There does seem to have a particularly high number of DC and DD when the student has
+2 siblings somehow. On the other hand, when you have 5 or more siblings, it seems
+unlikely to to get a grade AA due to distraction.
+
+Meanwhile, relative to other numbers, having 4 siblings will make you more likely 
+to get the best grade somehow. I don't really get this relationship here.
+
+### Testing the model
+
+```{r}
+pred.randomForest <- predict(model.randomForest, data[-train, ])
+table(pred.randomForest, data$GRADE[-train])
+```
+
+Hmmm, random forest's prediction doesn't seem to be particularly good here. It
+only yields an accuracy of
+`r sum(pred.randomForest == data$GRADE[-train]) / nrow(data[-train, ])`.
+Slightly disappointed, let's try with another model.
+
+## Using Support Vector Machine
+
+### Linear Kernel
+
+```{r}
+set.seed(1)
+tune.svm.linear <- tune(svm, GRADE ~ . , data = data[train, ], kernel = "linear",
+                        ranges = list(cost = c(0.1, 1, 10, 100, 1000), gamma = c(0.5, 1, 2, 3, 4)))
+model.svm.linear <- svm(GRADE ~ . , data = data, kernel = "linear", cost = 
+                          tune.svm.linear$best.parameters$cost,
+                        gamma = tune.svm.linear$best.parameters$gamma, subset = train)
+pred.svm.linear <- predict(model.svm.linear, data[-train, ])
+table(pred.svm.linear, data$GRADE[-train])
+```
+
+The accuracy of linear kernel for svm is 
+`r sum(pred.svm.linear == data$GRADE[-train]) / nrow(data[-train, ])`.
+
+### Polynomial Kernel
+
+```{r}
+tune.svm.poly <- tune(svm, GRADE ~ . , data = data[train, ], kernel = "polynomial",
+                        ranges = list(cost = c(0.1, 1, 10, 100, 1000), gamma = c(0.5, 1, 2, 3, 4)))
+model.svm.poly <- svm(GRADE ~ . , data = data, kernel = "polynomial", cost = 
+                          tune.svm.poly$best.parameters$cost,
+                        gamma = tune.svm.poly$best.parameters$gamma, subset = train)
+pred.svm.poly<- predict(model.svm.poly, data[-train, ])
+table(pred.svm.poly, data$GRADE[-train])
+```
+
+The accuracy of polynomial kernel for svm is 
+`r sum(pred.svm.poly == data$GRADE[-train]) / nrow(data[-train, ])`.
+
+### Radial Kernel
+
+Finally, let's try with Radial Kernel
+
+
+```{r}
+tune.svm.radial <- tune(svm, GRADE ~ . , data = data[train, ], kernel = "radial",
+                        ranges = list(cost = c(0.1, 1, 10, 100, 1000), gamma = c(0.5, 1, 2, 3, 4)))
+model.svm.radial <- svm(GRADE ~ . , data = data, 
+                        kernel = "radial",cost = 
+                          tune.svm.radial$best.parameters$cost,
+                        gamma = tune.svm.radial$best.parameters$gamma, subset = train)
+pred.svm.radial <- predict(model.svm.radial, data[-train, ])
+table(pred.svm.radial, data$GRADE[-train])
+```
+
+The accuracy of radial kernel for svm is 
+`r sum(pred.svm.radial == data$GRADE[-train]) / nrow(data[-train, ])`.
+
+Overall, the performance of the svm in this dataset seems to be quite poor, at least
+from the perspective of test set accuracy. The highest accuracy of all SVM models
+which is still lower than the accuracy from random forest model.
+
+## Multinomial Logistic Regression
+
+At this point I might as well test the logistic regression, although I am
+not particularly hopeful about it.
+
+```{r}
+model.log <- multinom(GRADE ~ . , data = data, subset = train)
+pred.log <- predict(model.log, newdata = data[-train, ])
+table(pred.log, data$GRADE[-train])
+```
+
+The accuracy of multinomial logistic regression is 
+`r sum(pred.log == data$GRADE[-train]) / nrow(data[-train, ])`.
+
+Rather low as well, and this is totally expected since other more complex models
+couldn't solve it. However, let's go for another similar 
+
+## The Lasso
+
+Also will try out the Lasso, as not every column might affect the GRADE.
+
+```{r}
+x <- data[train, ] %>%
+  select(-GRADE)
+y <- data$GRADE[train]
+data.tmp <- cbind(x, y)
+grid <- 10^seq(10,-2, length =100)
+model.tmp <- model.matrix(y ~ ., data = data.tmp)
+
+model.lasso <- cv.glmnet(model.tmp, y, alpha = 1, family = "multinomial", lambda = grid)
+
+model.tmp <- model.matrix(y ~ ., data = data.tmp[-train, ])
+
+x <- data[-train, ] %>%
+  select(-GRADE)
+y <- data$GRADE[-train]
+data.tmp <- cbind(x, y)
+model.tmp <- model.matrix(y ~ ., data = data.tmp)
+
+pred.lasso <- predict(model.lasso, newx = model.tmp, s = model.lasso$lambda.min,
+                      type = "class")
+
+table(pred.lasso, y)
+```
+
+The accuracy of multinomial lasso regression is 
+`r sum(pred.lasso == data$GRADE[-train]) / nrow(data[-train, ])`.
+
+Not that bad. It was almost as good as random forest. Finally, let's go with the KNN.
+
+## K Nearest Neighbor
+
+```{r}
+x <- data %>%
+  select(-GRADE)
+y <- data$GRADE
+
+train.control <- trainControl(method = "repeatedcv", number = 10)
+
+model.knn <- train(GRADE ~., data = data[train, ], method = "knn",
+               trControl = train.control,
+                preProcess = c("center", "scale"),
+                tuneLength = 10,
+               tuneGrid   = expand.grid(k = 1:10))
+
+pred.knn <- predict(model.knn, x[-train, ])
+table(pred.knn, y[-train])
+```
+
+```{r}
+summary(model.knn)
+```
+
+
+The accuracy of knn is 
+`r sum(pred.knn == data$GRADE[-train]) / nrow(data[-train, ])`.
+
+### Note on KNN
+
+When I was carrying out KNN using the training above, I came into this warning
+(not just 1 or 2, but many of them)
+
+```{r eval = FALSE}
+These variables have zero variances: LIVINGother, MOTHER_JOBself-employment
+```
+
+It totally struck me dumb because I have checked that there are multiple cases
+of exceptions regarding these columns.
+
+After undertaking some research on my own ([source](https://rstatisticsblog.com/data-science-in-action/data-preprocessing/how-to-identify-variables-with-zero-variance/)), I found out that if the column contains too little of a class
+will result in unstable prediction model. Thus, I guess this explains why
+KNN's best k is 1.
+
+Regardless, KNN did perform relatively well.
+
+
+## Conclusion
+
+Despite many different types of classification algorithms are used, some of them aren't even 
+performing better than 30%, and the best ones are still below 40%.
+
+In comparison to random guessing of 
+`r 1 / length(unique(data$GRADE)) * 100`,
+the model is of course much better, at an accuracy of approximately 2x random guessing.
+
+I would say that a big factor was due to the size of dataset which after
+split into train test, there's just slightly above 100 for the training set.
+In this scenario, I can't do much as well to overcome this issue.
+
+On the other hand, there could be much more reasons that explain the student's grade
+like their lifestyle and other factors which may not be able to be measured easily.
+
+Besides, I avoided PCA for dimentionality reduction because most of the columns
+are just factors instead of numerical, so I decide to just avoid them.
+
+Finally, here's a table of the prediction results
+
+```{r echo=FALSE}
+results <- data.frame(
+  model = c("Random Forest", "Support Vector Machine - Linear",
+           "Support Vector Machine - Polynomial", "Support Vector Machine - Radial",
+           "Multinomial Logistic Regression", "The Lasso", "KNN"),
+  result = c(sum(pred.randomForest == data$GRADE[-train]) / nrow(data[-train, ]),
+             sum(pred.svm.linear == data$GRADE[-train]) / nrow(data[-train, ]),
+             sum(pred.svm.poly == data$GRADE[-train]) / nrow(data[-train, ]),
+             sum(pred.svm.radial == data$GRADE[-train]) / nrow(data[-train, ]),
+             sum(pred.log == data$GRADE[-train]) / nrow(data[-train, ]),
+             sum(pred.lasso == data$GRADE[-train]) / nrow(data[-train, ]),
+             sum(pred.knn == data$GRADE[-train]) / nrow(data[-train, ]))
+)
+
+results
+```
+
+Out of all, random forest and KNN performed equally well at an 
+accuracy of 35%. I didn't do any further optimization except for using
+some cross validations to optimize the parameters.
+
+Nevertheless, I am rather satisfied with this 35% accuracy for it is a 
+multiclass classification.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
